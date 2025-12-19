@@ -1,0 +1,20 @@
+Python
+__pycache__/
+*.pyc
+*.log
+
+# Databases
+*.db
+
+# Specific project data and temporary files
+ML_DATA/T_45200000/
+run_01
+run_02
+
+# Editor/IDE specific files
+.aider.chat.history.md
+.aider.input.history
+
+# Virtual environment (if created locally)
+venv/
+.venv/
