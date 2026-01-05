@@ -255,56 +255,54 @@ from bs4 import BeautifulSoup
 
 def parse_urls(html):
     """
-    Extract App IDs and Tokens from the page without going inside tenders.
+    Extracts all tender data from the page HTML by iterating through each tender row.
+    Ensures all data for a single tender is collected from its corresponding row.
+    
     Returns:
-        page_data: list of dicts with App ID and Token
-        pagination_info: text info about page
+        all_page_data: list of dicts, where each dict contains full info for one tender.
+        pagination_info: text info about page.
     """
     soup = BeautifulSoup(html, "html.parser")
     rows = soup.select("#content tbody tr")
-
-    announcement_tags = soup.select("p:-soup-contains('განცხადების ნომერი:') > strong")
-    tenders_n = [tag.get_text().strip() for tag in announcement_tags]
-
-    # dates
-    start_date_tags = soup.select("p:-soup-contains('შესყიდვის გამოცხადების თარიღი:')")
-    tg_starts = [tag.get_text().split(':')[-1].strip() for tag in start_date_tags]
-
-    # Select all p tags that contain the phrase "წინდადებების მიღების ვადა:"
-    # Then get the text from those tags.
-    end_date_tags = soup.select("p:-soup-contains('წინდადებების მიღების ვადა:')")
-    tg_ends = [tag.get_text().split(':')[-1].strip() for tag in end_date_tags]
-
-    # ststius
-    status_tags = soup.select('p.status')
-
-    # Создать список извлеченного текста
-    all_statuses = [tag.get_text(strip=True) for tag in status_tags]
-
-    # tenders_n = soup.select("#content tbody განცხადების ნომერი: strong")
-    # breakpoint()
-    page_data = []
+    
+    all_page_data = []
 
     for row in rows:
-        onclick = row.get("onclick", "")
-        app_id, token = "", ""
-        m = re.search(r"ShowApp\((\d+),\s*'[^']*',\s*\d+,\s*'([^']+)'\)", onclick)
-        if m:
-            app_id, token = m.groups()
-
-        if not app_id or not token:
+        # Extract App ID and Token from onclick attribute
+        onclick_attr = row.get("onclick", "")
+        match = re.search(r"ShowApp\((\d+),\s*'[^']*',\s*\d+,\s*'([^']+)'\)", onclick_attr)
+        if not match:
             continue
+        app_id, token = match.groups()
 
-        page_data.append({
+        # Extract other data from within the row
+        # Using .get_text(strip=True) and checking for None to avoid errors if a tag is not found
+        status_tag = row.select_one("p.status")
+        status = status_tag.get_text(strip=True) if status_tag else "N/A"
+
+        tender_num_tag = row.select_one("p:-soup-contains('განცხადების ნომერი:') > strong")
+        tender_num = tender_num_tag.get_text(strip=True) if tender_num_tag else "N/A"
+
+        start_date_tag = row.select_one("p:-soup-contains('შესყიდვის გამოცხადების თარიღი:')")
+        start_date = start_date_tag.get_text().split(':')[-1].strip() if start_date_tag else "N/A"
+
+        end_date_tag = row.select_one("p:-soup-contains('წინდადებების მიღების ვადა:')")
+        end_date = end_date_tag.get_text().split(':')[-1].strip() if end_date_tag else "N/A"
+        
+        all_page_data.append({
             "App ID": app_id,
-            "Token": token
+            "Token": token,
+            "Tender Num": tender_num,
+            "Tender Start": start_date,
+            "Tender end": end_date,
+            "Tender Status": status
         })
 
     # Pagination info
     pagination_span = soup.find("span", string=lambda s: s and "ჩანაწერი" in s)
     pagination_info = pagination_span.get_text(strip=True) if pagination_span else "Not found"
 
-    return page_data, pagination_info, tenders_n, tg_starts, tg_ends, all_statuses
+    return all_page_data, pagination_info
 
 # --- Main ---
 all_data = []
@@ -326,7 +324,8 @@ try:
     perform_search()
     
     page_html = driver.page_source
-    _, pagination_info, _, _, _, _ = parse_urls(page_html)
+    # The new parse_urls returns a single list of complete tender data and pagination info
+    _, pagination_info = parse_urls(page_html)
     total_pages = extract_total_pages(pagination_info)
     END_PAGE = PAGE_END_ARG if PAGE_END_ARG is not None else total_pages
     if END_PAGE > total_pages:
@@ -355,23 +354,17 @@ try:
         if current_page >= START_PAGE:
             logger.info(f"\n--- Processing page {current_page} ---")
             page_html = driver.page_source
-            page_data, _, tenders, tenders_start, tenders_end, all_tender_statuses = parse_urls(page_html)
-            
-            if not page_data:
+            # The new parse_urls returns a single list of complete tender data
+            tender_data_on_page, _ = parse_urls(page_html)
+
+            if not tender_data_on_page:
                  logger.warning(f"⚠️ Page {current_page}: No tenders found on this page. Continuing...")
                  continue
 
-            logger.info(f"✅ Page {current_page}: Found {len(page_data)} tenders")
-
-            for item, tender_num, tender_start, tender_end, tender_status in zip(page_data, tenders, tenders_start, tenders_end, all_tender_statuses):
-                all_data.append({
-                    "App ID": item["App ID"],
-                    "Token": item["Token"],
-                    "Tender Num": tender_num,
-                    "Tender Start": tender_start,
-                    "Tender end": tender_end,
-                    "Tender Status": tender_status
-                })
+            logger.info(f"✅ Page {current_page}: Found {len(tender_data_on_page)} tenders")
+            
+            # Extend the main list with the data found on the current page
+            all_data.extend(tender_data_on_page)
 
 
     logger.info(f"\n--- STAGE 1 COMPLETE: Collected {len(all_data)} total tenders ---")
